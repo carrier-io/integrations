@@ -109,18 +109,13 @@ const ModalDialog = {
 
         <div class="modal-body">
             <slot name="body"></slot>
-            <div class="form-group">
-                <div>
-                    <label class="w-100">
-                        <p class="font-h5 font-semibold">Description<span class="text-gray-600 font-h6 font-weight-400 ml-1">(optional)</span></p>
-                        <p class="font-h6 font-weight-400 mb-2">You may specify the name of integration to differ from similar ones</p>
-                        <textarea class="form-control" rows="1"
-                            :value="description"
-                            @input="$emit('update:description', $event.target.value)">
-                        </textarea>
-    
-                    </label>
-                </div>
+            <div>
+                <p class="font-h5 font-semibold">Description<span class="text-gray-600 font-h6 font-weight-400 ml-1">(optional)</span></p>
+                <p class="font-h6 font-weight-400 mb-2">You may specify the name of integration to differ from similar ones</p>
+                <textarea class="form-control" rows="1"
+                    :value="description"
+                    @input="$emit('update:description', $event.target.value)">
+                </textarea>
                 <div class="mt-3">
                     <label class="custom-checkbox d-flex align-items-center">
                         <input class="mr-2.5" type="checkbox"
