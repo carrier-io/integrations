@@ -43,7 +43,7 @@ class ProjectAPI(api_tools.APIModeHandler):
             try:
                 return IntegrationPD.from_orm(db_integration).dict(), 200
             except ValidationError as e:
-                return e.errors(), 400            
+                return e.errors(), 400
 
     @auth.decorators.check_api({
         "permissions": ["configuration.integrations.integrations.edit"],
@@ -108,7 +108,7 @@ class ProjectAPI(api_tools.APIModeHandler):
             "administration": {"admin": True, "viewer": False, "editor": False},
             "default": {"admin": True, "viewer": False, "editor": False},
             "developer": {"admin": False, "viewer": False, "editor": False},
-        }})    
+        }})
     def delete(self, project_id: int, integration_id: int):
         with db.with_project_schema_session(project_id) as tenant_session:
             db_integration = tenant_session.query(IntegrationProject).filter(
@@ -197,7 +197,7 @@ class AdminAPI(api_tools.APIModeHandler):
             "administration": {"admin": True, "viewer": False, "editor": False},
             "default": {"admin": True, "viewer": False, "editor": False},
             "developer": {"admin": False, "viewer": False, "editor": False},
-        }})    
+        }})
     def delete(self, integration_id: int, **kwargs):
         IntegrationAdmin.query.filter(IntegrationAdmin.id == integration_id).delete()
         IntegrationAdmin.commit()

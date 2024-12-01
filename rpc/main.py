@@ -17,10 +17,12 @@ from tools import constants as c
 from pylon.core.tools import web
 
 
-def _usecret_field(integration_db, project_id):
+def _usecret_field(integration_db, project_id, is_local):
     settings = integration_db.settings
     secret_access_key = SecretField.parse_obj(settings['secret_access_key'])
     settings['secret_access_key'] = secret_access_key.unsecret(project_id=project_id)
+    settings['integration_id'] = integration_db.id
+    settings['is_local'] = is_local
     return settings
 
 
@@ -124,6 +126,13 @@ class RPC:
 
     @rpc('get_by_id')
     def get_by_id(self, project_id: Optional[int], integration_id: int) -> Optional[IntegrationProject]:
+        """
+        Get integration by id. Works properly if you know: inherited this integration or not.
+        :param project_id: id of project, where integration was created. If None - integration
+        from administration mode
+        :param integration_id: id of integration
+        :return: integration ORM object or None
+        """
         if project_id is not None:
             with db.with_project_schema_session(project_id) as tenant_session:
                 return tenant_session.query(IntegrationProject).filter(
@@ -132,7 +141,32 @@ class RPC:
         return IntegrationAdmin.query.filter(
             IntegrationAdmin.id == integration_id,
         ).one_or_none()
-        
+
+    @rpc('get_by_uid')
+    def get_by_uid(self, integration_uid: int, project_id: Optional[int] = None) -> Optional[IntegrationProject]:
+        """
+        Get integration by unique id. You can specify current project_id but not necessary.
+        :param integration_uid: uid of integration
+        :param project_id: id of current project
+        :return: integration ORM object or None
+        """
+        if project_id is not None:
+            with db.with_project_schema_session(project_id) as tenant_session:
+                if integration := tenant_session.query(IntegrationProject).filter(
+                    IntegrationProject.uid == integration_uid,
+                ).one_or_none():
+                    return integration
+        if integration := IntegrationAdmin.query.filter(
+            IntegrationAdmin.uid == integration_uid,
+        ).one_or_none():
+            return integration
+        projects = self.context.rpc_manager.call.project_list()
+        for project in projects:
+            with db.with_project_schema_session(project['id']) as tenant_session:
+                if integration := tenant_session.query(IntegrationProject).filter(
+                    IntegrationProject.uid == integration_uid,
+                ).one_or_none():
+                    return integration
 
     @web.rpc('security_test_create_integrations')
     @rpc_tools.wrap_exceptions(ValidationError)
@@ -323,7 +357,7 @@ class RPC:
         return reduce(reducer, results, defaultdict(list))
 
     @rpc('get_administration_integrations_by_name')
-    def get_administration_integrations_by_name(self, integration_name: str, 
+    def get_administration_integrations_by_name(self, integration_name: str,
                                                 only_shared: bool = False
                                                 ) -> List[IntegrationPD]:
         if integration_name not in self.integrations.keys():
@@ -367,12 +401,12 @@ class RPC:
 
         def _is_default(default_integrations, integration):
             for default_integration in default_integrations:
-                if (integration.project_id == default_integration.project_id and 
-                    integration.name == default_integration.name and 
+                if (integration.project_id == default_integration.project_id and
+                    integration.name == default_integration.name and
                     integration.id == default_integration.integration_id
                 ):
                     return True
-            return False                   
+            return False
 
         for integration in integrations:
             integration.is_default = False
@@ -432,15 +466,15 @@ class RPC:
         return self.process_default_integrations(project_id, results_project + results_admin)
 
     @rpc('update_attrs')
-    def update_attrs(self, 
-            integration_id: int, 
-            project_id: Optional[int], 
-            update_dict: dict, 
+    def update_attrs(self,
+            integration_id: int,
+            project_id: Optional[int],
+            update_dict: dict,
             return_result: bool = False
         ) -> Optional[dict]:
         update_dict.pop('id', None)
         if project_id:
-            with db.with_project_schema_session(project_id) as tenant_session:        
+            with db.with_project_schema_session(project_id) as tenant_session:
                 log.info('update_attrs called %s', [integration_id, project_id, update_dict])
                 tenant_session.query(IntegrationProject).filter(
                     IntegrationProject.id == integration_id
@@ -458,7 +492,7 @@ class RPC:
 
     @rpc('make_default_integration')
     def make_default_integration(self, integration, project_id):
-        with db.with_project_schema_session(project_id) as tenant_session: 
+        with db.with_project_schema_session(project_id) as tenant_session:
             if default_integration := tenant_session.query(IntegrationDefault).filter(
                 IntegrationDefault.name == integration.name,
                 IntegrationDefault.is_default == True,
@@ -468,7 +502,7 @@ class RPC:
                 tenant_session.commit()
             else:
                 default_integration = IntegrationDefault(name=integration.name,
-                                                         project_id=integration.project_id, 
+                                                         project_id=integration.project_id,
                                                          integration_id = integration.id,
                                                          is_default=True,
                                                          section=integration.section
@@ -478,7 +512,7 @@ class RPC:
 
     @rpc('delete_default_integration')
     def delete_default_integration(self, integration, project_id):
-        with db.with_project_schema_session(project_id) as tenant_session: 
+        with db.with_project_schema_session(project_id) as tenant_session:
             if default_integration := tenant_session.query(IntegrationDefault).filter(
                 IntegrationDefault.name == integration.name,
                 IntegrationDefault.is_default == True,
@@ -489,7 +523,7 @@ class RPC:
 
     @rpc('get_defaults')
     def get_defaults(self, project_id, name=None):
-        with db.with_project_schema_session(project_id) as tenant_session: 
+        with db.with_project_schema_session(project_id) as tenant_session:
             if name:
                 if integration := tenant_session.query(IntegrationDefault).filter(
                     IntegrationDefault.name == name,
@@ -503,19 +537,19 @@ class RPC:
     def get_admin_defaults(self, name=None):
         if name:
             if integration := IntegrationAdmin.query.filter(
-                IntegrationAdmin.is_default == True, 
+                IntegrationAdmin.is_default == True,
                 IntegrationAdmin.name == name,
             ).one_or_none():
                 return IntegrationPD.from_orm(integration)
         else:
             results= IntegrationAdmin.query.filter(
-                IntegrationAdmin.is_default == True, 
+                IntegrationAdmin.is_default == True,
             ).all()
             return parse_obj_as(List[IntegrationPD], results)
 
     @rpc('is_default')
     def is_default(self, project_id, integration_data):
-        with db.with_project_schema_session(project_id) as tenant_session: 
+        with db.with_project_schema_session(project_id) as tenant_session:
             return tenant_session.query(IntegrationDefault).filter(
                 IntegrationDefault.name == integration_data['name'],
                 IntegrationDefault.is_default == True,
@@ -533,16 +567,16 @@ class RPC:
                         IntegrationProject.id == integration_id,
                         IntegrationProject.name == integration_name
                     ).one_or_none():
-                        return _usecret_field(integration_db, project_id)
+                        return _usecret_field(integration_db, project_id, is_local=True)
             elif integration_id:
                 if integration_db := IntegrationAdmin.query.filter(
-                    IntegrationAdmin.id == integration_id, 
+                    IntegrationAdmin.id == integration_id,
                     IntegrationAdmin.name == integration_name,
                     IntegrationAdmin.config['is_shared'].astext.cast(Boolean) == True
                 ).one_or_none():
-                    return _usecret_field(integration_db, project_id)
+                    return _usecret_field(integration_db, project_id, is_local=False)
             # in case if integration_id is not provided - try to find default integration:
-            else: 
+            else:
                 with db.with_project_schema_session(project_id) as tenant_session:
                     default_integration = tenant_session.query(IntegrationDefault).filter(
                         IntegrationDefault.name == integration_name
@@ -552,17 +586,17 @@ class RPC:
                             IntegrationProject.id == default_integration.integration_id,
                             IntegrationProject.name == integration_name
                         ).one_or_none():
-                            return _usecret_field(integration_db, project_id)
+                            return _usecret_field(integration_db, project_id, is_local=True)
                     elif default_integration:
                         if integration_db := IntegrationAdmin.query.filter(
                             IntegrationAdmin.id == default_integration.integration_id,
                             IntegrationAdmin.name == integration_name,
                             IntegrationAdmin.config['is_shared'].astext.cast(Boolean) == True
                         ).one_or_none():
-                            return _usecret_field(integration_db, project_id)
+                            return _usecret_field(integration_db, project_id, is_local=False)
         except Exception as e:
             log.warning(f'Cannot receive S3 settings for project {project_id}')
-            log.warning(e)
+            log.debug(e)
 
     @rpc('get_s3_admin_settings')
     def get_s3_admin_settings(self, integration_id=None):
@@ -570,34 +604,34 @@ class RPC:
         try:
             if integration_id:
                 if integration_db := IntegrationAdmin.query.filter(
-                    IntegrationAdmin.id == integration_id, 
+                    IntegrationAdmin.id == integration_id,
                     IntegrationAdmin.name == integration_name,
                 ).one_or_none():
-                    return _usecret_field(integration_db, None)
+                    return _usecret_field(integration_db, None, is_local=False)
             # in case if integration_id is not provided - try to find default integration:
-            else: 
+            else:
                 if integration_db := IntegrationAdmin.query.filter(
                     IntegrationAdmin.name == integration_name,
                     IntegrationAdmin.is_default == True,
                 ).one_or_none():
-                    return _usecret_field(integration_db, None)
+                    return _usecret_field(integration_db, None, is_local=False)
         except Exception as e:
             log.warning(f'Cannot receive S3 settings in administration mode')
-            log.warning(e)
+            log.debug(e)
 
-    @rpc('create_default_s3_for_new_project')
-    def create_default_s3_for_new_project(self, project_id):
-        if integration_db := IntegrationAdmin.query.filter(
-            IntegrationAdmin.name == 's3_integration',
-            IntegrationAdmin.config['is_shared'].astext.cast(Boolean) == True,
-            IntegrationAdmin.is_default == True,
-        ).one_or_none():
-            with db.with_project_schema_session(project_id) as tenant_session:
-                default_integration = IntegrationDefault(name=integration_db.name,
-                                                        project_id=None, 
-                                                        integration_id = integration_db.id,
-                                                        is_default=True,
-                                                        section=integration_db.section
-                                                        )
-                tenant_session.add(default_integration)
-                tenant_session.commit()
+    # @rpc('create_default_s3_for_new_project')
+    # def create_default_s3_for_new_project(self, project_id):
+    #     if integration_db := IntegrationAdmin.query.filter(
+    #         IntegrationAdmin.name == 's3_integration',
+    #         IntegrationAdmin.config['is_shared'].astext.cast(Boolean) == True,
+    #         IntegrationAdmin.is_default == True,
+    #     ).one_or_none():
+    #         with db.with_project_schema_session(project_id) as tenant_session:
+    #             default_integration = IntegrationDefault(name=integration_db.name,
+    #                                                     project_id=None,
+    #                                                     integration_id = integration_db.id,
+    #                                                     is_default=True,
+    #                                                     section=integration_db.section
+    #                                                     )
+    #             tenant_session.add(default_integration)
+    #             tenant_session.commit()
